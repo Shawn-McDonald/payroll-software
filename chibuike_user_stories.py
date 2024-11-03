@@ -4,6 +4,7 @@ from tkinter import messagebox, ttk, filedialog
 from datetime import datetime
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.pdfgen import canvas
+# import shawn_user_stories
 
 # Initialize main window
 root=tk.Tk()
@@ -80,10 +81,14 @@ def clocked_out():
     rindex=rows.index(nowTime)
     cindex=cols.index(nowDay)
 
-    time_log_matrix[rindex][cindex]=f"Out: {logcoTime}"  # Save clock-out time
-    update_treeview()  # Update Treeview display
-
-    messagebox.showinfo("Alert", f"You have clocked out on {coTime}!")  # Notify user of clock-out
+    # Check if a clock-in time already exists for this hour
+    if "In:" in time_log_matrix[rindex][cindex]:
+        messagebox.showerror("Alert", f"You must work up to atleast one hour before clocking out!")
+    else:
+        # Log clock-out time if no clock-in entry exists
+        time_log_matrix[rindex][cindex] = f"Out: {logcoTime}"
+        update_treeview()
+        messagebox.showinfo("Alert", f"You have clocked out on {coTime}!")  # Notify user of clock-out
 
 # Function to generate a unique filename to avoid overwriting existing files
 def uniquefname(dir, fn):
