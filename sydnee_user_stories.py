@@ -2,10 +2,14 @@ import os
 import tkinter as tk
 from tkinter import messagebox, ttk, simpledialog
 from datetime import datetime, timedelta
+from database import EmployeeDatabase
 
 root = tk.Tk()
 root.title("Employee Time Tracker")
 root.geometry("1360x800")
+
+# Instantiate the database
+db = EmployeeDatabase()
 
 # Set up column headers and times for Treeview
 name = "Chibuike Ijem"
@@ -68,6 +72,7 @@ def clocked_in():
 
     now = datetime.now()
     day_key = now.strftime("%Y-%m-%d")
+    db.log_time(employee_id, day_key, clock_in=now.strftime('%I:%M:%S %p'))
     if day_key not in daily_log:
         daily_log[day_key] = {"clock_in": [], "clock_out": []}
     daily_log[day_key]["clock_in"].append(now)
@@ -82,6 +87,7 @@ def clocked_out():
     day_key = now.strftime("%Y-%m-%d")
     if day_key in daily_log and daily_log[day_key]["clock_in"]:
         daily_log[day_key]["clock_out"].append(now)
+        db.log_time(employee_id, day_key, clock_out=now.strftime('%I:%M:%S %p'))
         calculate_daily_earnings(day_key)
         messagebox.showinfo("Clocked Out", f"Clocked out at {now.strftime('%I:%M:%S %p')} on {day_key}")
     else:
@@ -185,5 +191,7 @@ button_6.grid(row=3, column=5, padx=30, pady=15, sticky="ew")
 
 # Prompt user for pay and tax settings before main interface opens
 set_pay_and_tax()
+
+employee_id = db.add_employee(name, hourly_pay, tax_deduction)
 
 root.mainloop() 
