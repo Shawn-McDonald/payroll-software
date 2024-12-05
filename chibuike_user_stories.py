@@ -1,10 +1,75 @@
 import os
 import tkinter as tk
+import mysql.connector
 from tkinter import messagebox, ttk, filedialog
 from datetime import datetime
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.pdfgen import canvas
+from mysql.connector import Error
 # import shawn_user_stories
+
+# Creates a connection to the database
+def create_connection():
+    try:
+        conn=mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="naijaboy@1",
+            database="EmployeeTimeTracker"
+        )
+        if conn.is_connected():
+            print("Connection successfully made")
+            return conn
+    except Error as e:
+        print(f"Error: {e}")
+        return None
+
+# Establish the connection
+db_conn=create_connection()
+cursor=db_conn.cursor(dictionary=True)
+
+# Validates a user's login credentials after a connection is made
+def validate_user(username, password):
+    query = "select * from Users where Username = %s and PasswordHash = SHA2(%s, 256)"
+    cursor.execute(query, (username, password))
+    result = cursor.fetchone()
+    if result:
+        print(f"Welcome {result['FullName']}")
+        return result['UserID']  # Return UserID for session tracking
+    else:
+        print("Invalid username or password")
+        return None
+
+# Gets the clock-in/clock-out data for the current week
+def current_week_data(user_id):
+    current_wkLabel=datetime.now().strftime("Week of %b. %d")
+    query="""
+    select DayOfWeek, TimeLog
+    from ClockLogs
+    where UserID = %s and WeekLabel = %s;
+    """
+    cursor.execute(query, (user_id, current_wkLabel))
+    data=cursor.fetchall()
+    return {row['DayOfWeek']: row['TimeLog'] for row in data}
+
+# Loads the 2D matrix with data from the database
+def load_matrix(user_id):
+    week_data=current_week_data(user_id)
+    for i, day in enumerate(cols[1:]):
+        for rowidx, time_entry in enumerate(rows):
+            if day in week_data:
+                time_log_matrix[rowidx][i + 1] = week_data[day]
+    update_treeview()
+
+# Saves the clock-in/clock-out data to the database
+def save_time_log(user_id, weekLabel, day, time_log):
+    query="""
+    insert into ClockLogs (UserID, WeekLabel, DayOfWeek, TimeLog, LogDate)
+    values (%s, %s, %s, %s, curdate())
+    on duplicate key update TimeLog = %s;
+    """
+    cursor.execute(query, (user_id, weekLabel, day, time_log, time_log))
+    db_conn.commit()
 
 # Initialize main window
 root=tk.Tk()
@@ -54,12 +119,37 @@ def update_treeview():
     for i, row in enumerate(time_log_matrix):
         time_log.item(time_log.get_children()[i], values=[rows[i]] + row[1:])
 
+# Function to check if it is a new week
+def new_week():
+    current_wkLabel=datetime.now().strftime("Week of %b. %d")
+    query="select max(WeekLabel) as LastWeek from ClockLogs where UserID = %s"
+    cursor.execute(query, (1,))
+    result=cursor.fetchone()
+    last_wkLabel=result['LastWeek'] if result['LastWeek'] else None
+    return last_wkLabel != current_wkLabel
+
+# Clears 2D matrix for the new week
+def clear_last_matrix():
+    for row in time_log_matrix:
+        for col in range(1, len(row)):
+            row[col]=""
+    update_treeview()
+
+if new_week():
+    clear_last_matrix()
+
+# Logs the user in and loads their matrix
+user_id = validate_user("johndoe", "password123")
+if user_id:
+    load_matrix(user_id)
+
 # Function to log the user's clock-in time
 def clocked_in():
     nowDay=datetime.now().strftime("%a")  # Get current day abbreviation
     nowTime=datetime.now().strftime("%I:00 %p").lstrip('0')  # Get the current time in "hour:00 AM/PM" format
     ciTime=datetime.now().strftime("%b %d, %Y at %I:%M %p")  # Clock-in time as string
     logciTime=datetime.now().strftime("%I:%M:%S %p")  # Clock-in time with seconds
+    weekLabel=datetime.now().strftime("Week of %b. %d")
 
     # Find the correct row and column in the matrix to store the clock-in time
     rindex=rows.index(nowTime) 
@@ -68,6 +158,10 @@ def clocked_in():
     time_log_matrix[rindex][cindex]=f"In: {logciTime}"  # Save clock-in time
     update_treeview()  # Update Treeview display
     
+    save_time_log(user_id=1,
+        weekLabel=weekLabel,
+        day=nowDay,
+        time_log=f"In: {logciTime}")
     messagebox.showinfo("Alert", f"You have clocked in on {ciTime}!")  # Notify user of clock-in
 
 # Function to log the user's clock-out time
@@ -76,6 +170,7 @@ def clocked_out():
     nowTime=datetime.now().strftime("%I:00 %p").lstrip('0')  # Get the current time in "hour:00 AM/PM" format
     coTime=datetime.now().strftime("%b %d, %Y at %I:%M %p")  # Clock-out time as string
     logcoTime=datetime.now().strftime("%I:%M:%S %p")  # Clock-out time with seconds
+    weekLabel=datetime.now().strftime("Week of %b. %d")
 
     # Find the correct row and column in the matrix to store the clock-out time
     rindex=rows.index(nowTime)
@@ -84,11 +179,16 @@ def clocked_out():
     # Check if a clock-in time already exists for this hour
     if "In:" in time_log_matrix[rindex][cindex]:
         messagebox.showerror("Alert", f"You must work up to atleast one hour before clocking out!")
-    else:
-        # Log clock-out time if no clock-in entry exists
-        time_log_matrix[rindex][cindex] = f"Out: {logcoTime}"
-        update_treeview()
-        messagebox.showinfo("Alert", f"You have clocked out on {coTime}!")  # Notify user of clock-out
+        return
+    
+    # Log clock-out time if no clock-in entry exists
+    time_log_matrix[rindex][cindex] = f"Out: {logcoTime}"
+    update_treeview()
+    save_time_log(user_id=1,
+        weekLabel=weekLabel,
+        day=nowDay,
+        time_log=f"Out: {logcoTime}")
+    messagebox.showinfo("Alert", f"You have clocked out on {coTime}!")  # Notify user of clock-out
 
 # Function to generate a unique filename to avoid overwriting existing files
 def uniquefname(dir, fn):
@@ -162,3 +262,17 @@ button_3.grid(row=2, column=3, padx=30, pady=15, sticky="ew")
 
 # Start the application loop
 root.mainloop()
+
+# Testing block for standalone executions
+if __name__ == "__main__":
+    db_conn = create_connection()
+    if db_conn:
+        cursor = db_conn.cursor(dictionary=True)
+
+        # Test fetching data
+        cursor.execute("select * from Users;")
+        users = cursor.fetchall()
+        print("Users:", users)
+
+        # Close the connection
+        db_conn.close()
